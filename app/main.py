@@ -7,9 +7,11 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, constr
 from sqlalchemy.orm import Session
-
 from app.config.db import Base, engine, get_db
 from app.domain.user import User
+from pydantic import BaseModel, constr
+from typing import List
+from app.domain.post import Post
 
 app = FastAPI(title="Simple Community API")
 
@@ -38,6 +40,23 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: constr(min_length=4, max_length=72)
+
+class PostCreateRequest(BaseModel):
+    title: constr(min_length=1, max_length=200)
+    content: constr(min_length=1)
+
+class PostUpdateRequest(BaseModel):
+    title: constr(min_length=1, max_length=200) | None = None
+    content: constr(min_length=1) | None = None
+
+class PostResponse(BaseModel):
+    id: int
+    title: str
+    content: str
+    author_id: int
+    created_at: datetime
+    updated_at: datetime
+
 
 
 # ===== Helpers =====
@@ -129,3 +148,109 @@ def me(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "nickname": current_user.nickname,
     }
+
+@app.get("/posts")
+def list_posts(db: Session = Depends(get_db)):
+    posts = db.query(Post).order_by(Post.id.desc()).limit(50).all()
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "content": p.content,
+            "author_id": p.author_id,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
+        }
+        for p in posts
+    ]
+
+
+@app.get("/posts/{post_id}")
+def get_post(post_id: int, db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content": post.content,
+        "author_id": post.author_id,
+        "created_at": post.created_at,
+        "updated_at": post.updated_at,
+    }
+
+
+@app.post("/posts")
+def create_post(
+    req: PostCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    post = Post(
+        title=req.title,
+        content=req.content,
+        author_id=current_user.id,
+    )
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content": post.content,
+        "author_id": post.author_id,
+        "created_at": post.created_at,
+        "updated_at": post.updated_at,
+    }
+
+
+@app.put("/posts/{post_id}")
+def update_post(
+    post_id: int,
+    req: PostUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if post.author_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    if req.title is not None:
+        post.title = req.title
+    if req.content is not None:
+        post.content = req.content
+
+    db.commit()
+    db.refresh(post)
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content": post.content,
+        "author_id": post.author_id,
+        "created_at": post.created_at,
+        "updated_at": post.updated_at,
+    }
+
+
+@app.delete("/posts/{post_id}")
+def delete_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if post.author_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    db.delete(post)
+    db.commit()
+    return {"ok": True}
