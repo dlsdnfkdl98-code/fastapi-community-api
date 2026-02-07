@@ -1,0 +1,30 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: community-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:3306"
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  api:
+    build: .
+    container_name: community-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 컨테이너 내부에서는 DB_HOST를 서비스 이름으로 접근
+      DB_HOST: db
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  mysql_data:
